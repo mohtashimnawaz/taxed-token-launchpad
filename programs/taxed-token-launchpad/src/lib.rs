@@ -81,6 +81,7 @@ pub mod taxed_token_launchpad {
             &init_tf_ix,
             &[
                 ctx.accounts.mint.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
                 ctx.accounts.fee_withdraw_authority.to_account_info(),
                 ctx.accounts.token_program.to_account_info(),
                 ctx.accounts.rent.to_account_info(),
@@ -158,9 +159,9 @@ pub struct CreateTaxedToken<'info> {
     pub payer: Signer<'info>,
 
     /// The mint account to be created (passed as system account)
-    /// CHECK: we create and initialize this account in the instruction
+    /// CHECK: this is a Keypair signer for the new mint account
     #[account(mut)]
-    pub mint: UncheckedAccount<'info>,
+    pub mint: Signer<'info>,
 
     /// Authority that will be set as the mint authority
     /// CHECK: this account must be a signer (the mint authority)
@@ -188,9 +189,9 @@ pub struct CreateSoulboundToken<'info> {
     pub payer: Signer<'info>,
 
     /// The mint account to be created
-    /// CHECK: we create and initialize this account in the instruction
+    /// CHECK: this is a Keypair signer for the new mint account
     #[account(mut)]
-    pub mint: UncheckedAccount<'info>,
+    pub mint: Signer<'info>,
 
     /// Authority that will be set as mint authority
     /// CHECK: this account must be a signer (the mint authority)

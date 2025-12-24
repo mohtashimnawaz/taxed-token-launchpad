@@ -28,20 +28,32 @@ describe("taxed-token-launchpad (Token-2022 tests)", () => {
     const maximumFee = 1_000_000; // large
 
     // Create the taxed token via program CPI
-    await program.methods
-      .createTaxedToken(decimals, transferFeeBps, new anchor.BN(maximumFee))
-      .accounts({
-        payer: payer.publicKey,
-        mint: mint.publicKey,
-        mintAuthority: payer.publicKey,
-        feeWithdrawAuthority: payer.publicKey,
-        freezeAuthority: payer.publicKey,
-        tokenProgram: TOKEN_2022_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-      })
-      .signers([mint])
-      .rpc();
+    console.log('signers:', {
+      payer: payer.publicKey.toBase58(),
+      mint: mint.publicKey.toBase58(),
+      mintAuthority: payer.publicKey.toBase58(),
+      feeWithdrawAuthority: payer.publicKey.toBase58(),
+    });
+
+    try {
+      await program.methods
+        .createTaxedToken(decimals, transferFeeBps, new anchor.BN(maximumFee))
+        .accounts({
+          payer: payer.publicKey,
+          mint: mint.publicKey,
+          mintAuthority: payer.publicKey,
+          feeWithdrawAuthority: payer.publicKey,
+          freezeAuthority: payer.publicKey,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        })
+        .signers([mint])
+        .rpc();
+    } catch (e) {
+      console.error('createTaxedToken error', e.toString());
+      throw e;
+    }
 
     // Wrap mint with Token-2022 client
     const token = new Token(
@@ -90,19 +102,30 @@ describe("taxed-token-launchpad (Token-2022 tests)", () => {
     const recipient = Keypair.generate();
 
     // Create soulbound mint
-    await program.methods
-      .createSoulboundToken(6)
-      .accounts({
-        payer: payer.publicKey,
-        mint: mint.publicKey,
-        mintAuthority: payer.publicKey,
-        freezeAuthority: payer.publicKey,
-        tokenProgram: TOKEN_2022_PROGRAM_ID,
-        systemProgram: anchor.web3.SystemProgram.programId,
-        rent: anchor.web3.SYSVAR_RENT_PUBKEY,
-      })
-      .signers([mint])
-      .rpc();
+    console.log('signers:', {
+      payer: payer.publicKey.toBase58(),
+      mint: mint.publicKey.toBase58(),
+      mintAuthority: payer.publicKey.toBase58(),
+    });
+
+    try {
+      await program.methods
+        .createSoulboundToken(6)
+        .accounts({
+          payer: payer.publicKey,
+          mint: mint.publicKey,
+          mintAuthority: payer.publicKey,
+          freezeAuthority: payer.publicKey,
+          tokenProgram: TOKEN_2022_PROGRAM_ID,
+          systemProgram: anchor.web3.SystemProgram.programId,
+          rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+        })
+        .signers([mint])
+        .rpc();
+    } catch (e) {
+      console.error('createSoulboundToken error', e.toString());
+      throw e;
+    }
 
     const token = new Token(provider.connection, mint.publicKey, TOKEN_2022_PROGRAM_ID, payer);
 
