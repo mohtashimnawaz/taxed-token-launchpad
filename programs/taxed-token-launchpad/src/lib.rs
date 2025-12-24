@@ -2,13 +2,12 @@ use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke, system_instruction};
 use anchor_lang::solana_program::sysvar::rent::Rent;
 use anchor_lang::solana_program::program_pack::Pack;
-use solana_program::pubkey::Pubkey;
+use anchor_lang::solana_program::pubkey::Pubkey; 
 
 // Import spl-token-2022 instruction constructors and state types
 use spl_token_2022::instruction as token_instruction;
 use spl_token_2022::state::Mint as Token2022Mint;
-use spl_token_2022::state::Account as Token2022Account;
-use spl_token_2022::state::TransferFeeConfig;
+use spl_token_2022::extension::transfer_fee::instruction::initialize_transfer_fee_config;
 
 declare_id!("9zZZdmpER8Pw9QJMwSyd8cvV8swbZWeqfJG3Gz2HhVGz");
 
@@ -54,9 +53,9 @@ pub mod taxed_token_launchpad {
         let init_mint_ix = token_instruction::initialize_mint(
             &ctx.accounts.token_program.key(),
             &ctx.accounts.mint.key(),
-            decimals,
             &ctx.accounts.mint_authority.key(),
             Some(&ctx.accounts.freeze_authority.key()),
+            decimals,
         )?;
 
         invoke(
@@ -69,17 +68,13 @@ pub mod taxed_token_launchpad {
         )?;
 
         // Initialize the transfer fee config extension
-        let tf_config = TransferFeeConfig {
-            transfer_fee_basis_points,
-            maximum_fee,
-            withheld_amount: 0u64,
-        };
-
-        let init_tf_ix = token_instruction::initialize_transfer_fee_config(
+        let init_tf_ix = initialize_transfer_fee_config(
             &ctx.accounts.token_program.key(),
             &ctx.accounts.mint.key(),
-            &tf_config,
-            &ctx.accounts.fee_withdraw_authority.key(),
+            Some(&ctx.accounts.mint_authority.key()),
+            Some(&ctx.accounts.fee_withdraw_authority.key()),
+            transfer_fee_basis_points,
+            maximum_fee,
         )?;
 
         invoke(
@@ -124,9 +119,9 @@ pub mod taxed_token_launchpad {
         let init_mint_ix = token_instruction::initialize_mint(
             &ctx.accounts.token_program.key(),
             &ctx.accounts.mint.key(),
-            decimals,
             &ctx.accounts.mint_authority.key(),
             Some(&ctx.accounts.freeze_authority.key()),
+            decimals,
         )?;
 
         invoke(
@@ -202,9 +197,11 @@ pub struct CreateSoulboundToken<'info> {
     pub mint_authority: UncheckedAccount<'info>,
 
     /// Optional freeze authority
+    /// CHECK: any pubkey
     pub freeze_authority: UncheckedAccount<'info>,
 
     /// Token-2022 program
+    /// CHECK: must be the SPL Token-2022 program id
     pub token_program: UncheckedAccount<'info>,
 
     pub system_program: Program<'info, System>,
