@@ -163,12 +163,12 @@ pub struct CreateTaxedToken<'info> {
     pub mint: UncheckedAccount<'info>,
 
     /// Authority that will be set as the mint authority
-    /// CHECK: any pubkey can be set as mint authority (we pass a signer from client)
-    pub mint_authority: UncheckedAccount<'info>,
+    /// CHECK: this account must be a signer (the mint authority)
+    pub mint_authority: Signer<'info>,
 
     /// Authority that will be allowed to withdraw withheld fees
-    /// CHECK: any pubkey
-    pub fee_withdraw_authority: UncheckedAccount<'info>,
+    /// CHECK: this account must be a signer (fee withdraw authority)
+    pub fee_withdraw_authority: Signer<'info>,
 
     /// Optional freeze authority
     /// CHECK: any pubkey
@@ -193,8 +193,8 @@ pub struct CreateSoulboundToken<'info> {
     pub mint: UncheckedAccount<'info>,
 
     /// Authority that will be set as mint authority
-    /// CHECK: any pubkey
-    pub mint_authority: UncheckedAccount<'info>,
+    /// CHECK: this account must be a signer (the mint authority)
+    pub mint_authority: Signer<'info>,
 
     /// Optional freeze authority
     /// CHECK: any pubkey
