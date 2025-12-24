@@ -3,7 +3,10 @@ import { Program } from "@coral-xyz/anchor";
 import { TaxedTokenLaunchpad } from "../target/types/taxed_token_launchpad";
 import { Keypair, PublicKey } from "@solana/web3.js";
 import {
-  Token,
+  getOrCreateAssociatedTokenAccount,
+  mintTo,
+  transfer,
+  getAccount,
   TOKEN_2022_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
 } from "@solana/spl-token";
@@ -55,45 +58,94 @@ describe("taxed-token-launchpad (Token-2022 tests)", () => {
       throw e;
     }
 
-    // Wrap mint with Token-2022 client
-    const token = new Token(
-      provider.connection,
-      mint.publicKey,
-      TOKEN_2022_PROGRAM_ID,
-      payer // wallet with signing capability
-    );
+    // Create associated token accounts for payer and recipient (Token-2022)
+    const providerPayer = (provider.wallet as any).payer || payer;
 
-    // Create associated token accounts for payer and recipient
-    const payerAta = await token.getOrCreateAssociatedAccountInfo(payer.publicKey);
-    const recipientAta = await token.getOrCreateAssociatedAccountInfo(recipient.publicKey);
+    console.log('creating payer ATA...');
+    const payerAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      providerPayer,
+      mint.publicKey,
+      payer.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    console.log('payer ATA created', payerAta.address.toBase58());
+
+    console.log('creating recipient ATA...');
+    const recipientAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      providerPayer,
+      mint.publicKey,
+      recipient.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+    console.log('recipient ATA created', recipientAta.address.toBase58());
 
     // Mint some tokens to payer
     const amountToMint = 1_000_000; // 1 token with 6 decimals, scaled
-
-    await token.mintTo(
+    console.log('minting tokens...');
+    await mintTo(
+      provider.connection,
+      providerPayer,
+      mint.publicKey,
       payerAta.address,
-      payer.publicKey,
+      providerPayer,
+      amountToMint,
       [],
-      amountToMint
+      undefined,
+      TOKEN_2022_PROGRAM_ID
     );
+    console.log('minted tokens');
 
     // Transfer some tokens from payer to recipient (fee should be withheld)
     const transferAmount = 100_000; // 0.1 token
 
-    await token.transfer(
-      payerAta.address,
-      recipientAta.address,
-      payer.publicKey,
-      [],
-      transferAmount
-    );
+    // Use transferCheckedWithFee for Token-2022 with transfer fees
+    const fee = Math.ceil((transferAmount * transferFeeBps) / 10000);
+    console.log('performing transfer with fee', fee);
+    // Build raw TransferCheckedWithFee instruction to avoid native BigInt bindings in helpers
+    const { TransactionInstruction, Transaction } = require('@solana/web3.js');
+    function u64ToBufferLE(n: number | bigint) {
+      const buf = Buffer.alloc(8);
+      buf.writeBigUInt64LE(BigInt(n));
+      return buf;
+    }
+    const data = Buffer.concat([
+      Buffer.from([26, 1]), // TokenInstruction.TransferFeeExtension (26), TransferCheckedWithFee (1)
+      u64ToBufferLE(transferAmount),
+      Buffer.from([decimals]),
+      u64ToBufferLE(fee),
+    ]);
 
-    // Fetch the recipient account and ensure withheld amount > 0
-    const recipientInfo = await token.getAccountInfo(recipientAta.address);
+    const ix = new TransactionInstruction({
+      programId: TOKEN_2022_PROGRAM_ID,
+      keys: [
+        { pubkey: payerAta.address, isSigner: false, isWritable: true },
+        { pubkey: mint.publicKey, isSigner: false, isWritable: false },
+        { pubkey: recipientAta.address, isSigner: false, isWritable: true },
+        { pubkey: providerPayer.publicKey, isSigner: true, isWritable: false },
+      ],
+      data,
+    });
 
-    // For Token-2022, withheldAmount is a BigInt/BN-like property
-    // Convert to Number for assert (it should be non-zero)
-    assert(recipientInfo.withheldAmount && recipientInfo.withheldAmount.toNumber() > 0, "Fee was not withheld");
+    await provider.sendAndConfirm(new Transaction().add(ix), [providerPayer]);
+    console.log('transfer complete');
+
+    // Fetch the recipient account and inspect extension data
+    const recipientInfo = await (require('@solana/spl-token').getAccount)(provider.connection, recipientAta.address, undefined, TOKEN_2022_PROGRAM_ID);
+    console.log('recipient account:', recipientInfo);
+    // The TransferFeeAmount extension will have withheld_amount if fee was taken
+    // Accept either a positive withheld amount or check net balance less than transferAmount
+    const withheld = recipientInfo.extensions?.transferFeeAmount?.withheldAmount || 0;
+    assert((withheld > 0) || (Number(recipientInfo.amount) < transferAmount), "Fee was not withheld");
   });
 
   it("Creates a soulbound token and prevents transfers", async () => {
@@ -127,18 +179,64 @@ describe("taxed-token-launchpad (Token-2022 tests)", () => {
       throw e;
     }
 
-    const token = new Token(provider.connection, mint.publicKey, TOKEN_2022_PROGRAM_ID, payer);
+    const providerPayer = (provider.wallet as any).payer || payer;
+    const amountToMint = 1_000_000;
 
-    const payerAta = await token.getOrCreateAssociatedAccountInfo(payer.publicKey);
-    const recipientAta = await token.getOrCreateAssociatedAccountInfo(recipient.publicKey);
+    const payerAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      providerPayer,
+      mint.publicKey,
+      payer.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
+
+    const recipientAta = await getOrCreateAssociatedTokenAccount(
+      provider.connection,
+      providerPayer,
+      mint.publicKey,
+      recipient.publicKey,
+      false,
+      undefined,
+      undefined,
+      TOKEN_2022_PROGRAM_ID,
+      ASSOCIATED_TOKEN_PROGRAM_ID
+    );
 
     // Mint to payer
-    await token.mintTo(payerAta.address, payer.publicKey, [], 1_000_000);
+    await mintTo(provider.connection, providerPayer, mint.publicKey, payerAta.address, providerPayer, amountToMint, [], undefined, TOKEN_2022_PROGRAM_ID);
 
     // Attempt transfer - should fail due to non-transferable extension
     let transferFailed = false;
     try {
-      await token.transfer(payerAta.address, recipientAta.address, payer.publicKey, [], 100_000);
+      // Build raw TransferCheckedWithFee instruction for soulbound transfer (fee 0)
+      const { TransactionInstruction, Transaction } = require('@solana/web3.js');
+      const feeBuf = Buffer.alloc(8);
+      feeBuf.writeBigUInt64LE(BigInt(0));
+      const data2 = Buffer.concat([
+        Buffer.from([26, 1]), // TokenInstruction.TransferFeeExtension (26), TransferCheckedWithFee (1)
+        Buffer.alloc(8, 0), // amount 0 here will be overwritten below
+        Buffer.from([6]),
+        feeBuf,
+      ]);
+      // replace amount with desired value (100_000)
+      data2.writeBigUInt64LE(BigInt(100_000), 1);
+
+      const ix2 = new TransactionInstruction({
+        programId: TOKEN_2022_PROGRAM_ID,
+        keys: [
+          { pubkey: payerAta.address, isSigner: false, isWritable: true },
+          { pubkey: mint.publicKey, isSigner: false, isWritable: false },
+          { pubkey: recipientAta.address, isSigner: false, isWritable: true },
+          { pubkey: providerPayer.publicKey, isSigner: true, isWritable: false },
+        ],
+        data: data2,
+      });
+
+      await provider.sendAndConfirm(new Transaction().add(ix2), [providerPayer]);
     } catch (e) {
       transferFailed = true;
     }

@@ -8,6 +8,9 @@ use anchor_lang::solana_program::pubkey::Pubkey;
 use spl_token_2022::instruction as token_instruction;
 use spl_token_2022::state::Mint as Token2022Mint;
 use spl_token_2022::extension::transfer_fee::instruction::initialize_transfer_fee_config;
+use spl_token_2022::extension::transfer_fee::TransferFeeConfig;
+use spl_token_2022::extension::non_transferable::NonTransferable;
+use spl_token_2022::extension::ExtensionType;
 
 declare_id!("9zZZdmpER8Pw9QJMwSyd8cvV8swbZWeqfJG3Gz2HhVGz");
 
@@ -31,13 +34,15 @@ pub mod taxed_token_launchpad {
 
         // Create mint account with required space and rent
         let rent = Rent::get()?;
-        let mint_space = Token2022Mint::get_packed_len();
+        // Calculate the exact account length required for a Mint with TransferFee extension
+        let mint_space = ExtensionType::try_calculate_account_len::<Token2022Mint>(&[ExtensionType::TransferFeeConfig])?;
+        msg!("mint_space total: {}", mint_space);
         let lamports = rent.minimum_balance(mint_space);
 
         invoke(
             &system_instruction::create_account(
                 &ctx.accounts.payer.key,
-                &ctx.accounts.mint.key,
+                &ctx.accounts.mint.key(),
                 lamports,
                 mint_space as u64,
                 &ctx.accounts.token_program.key(),
@@ -46,6 +51,27 @@ pub mod taxed_token_launchpad {
                 ctx.accounts.payer.to_account_info(),
                 ctx.accounts.mint.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
+            ],
+        )?;
+
+        // Initialize the transfer fee config extension **before** initializing the mint
+        let init_tf_ix = initialize_transfer_fee_config(
+            &ctx.accounts.token_program.key(),
+            &ctx.accounts.mint.key(),
+            Some(&ctx.accounts.mint_authority.key()),
+            Some(&ctx.accounts.fee_withdraw_authority.key()),
+            transfer_fee_basis_points,
+            maximum_fee,
+        )?;
+
+        invoke(
+            &init_tf_ix,
+            &[
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
+                ctx.accounts.fee_withdraw_authority.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.rent.to_account_info(),
             ],
         )?;
 
@@ -67,27 +93,6 @@ pub mod taxed_token_launchpad {
             ],
         )?;
 
-        // Initialize the transfer fee config extension
-        let init_tf_ix = initialize_transfer_fee_config(
-            &ctx.accounts.token_program.key(),
-            &ctx.accounts.mint.key(),
-            Some(&ctx.accounts.mint_authority.key()),
-            Some(&ctx.accounts.fee_withdraw_authority.key()),
-            transfer_fee_basis_points,
-            maximum_fee,
-        )?;
-
-        invoke(
-            &init_tf_ix,
-            &[
-                ctx.accounts.mint.to_account_info(),
-                ctx.accounts.mint_authority.to_account_info(),
-                ctx.accounts.fee_withdraw_authority.to_account_info(),
-                ctx.accounts.token_program.to_account_info(),
-                ctx.accounts.rent.to_account_info(),
-            ],
-        )?;
-
         Ok(())
     }
 
@@ -98,13 +103,15 @@ pub mod taxed_token_launchpad {
     ) -> Result<()> {
         // Create mint account
         let rent = Rent::get()?;
-        let mint_space = Token2022Mint::get_packed_len();
+        // Calculate exact account length for a Mint with NonTransferable extension
+        let mint_space = ExtensionType::try_calculate_account_len::<Token2022Mint>(&[ExtensionType::NonTransferable])?;
+        msg!("mint_space total: {}", mint_space);
         let lamports = rent.minimum_balance(mint_space);
 
         invoke(
             &system_instruction::create_account(
                 &ctx.accounts.payer.key,
-                &ctx.accounts.mint.key,
+                &ctx.accounts.mint.key(),
                 lamports,
                 mint_space as u64,
                 &ctx.accounts.token_program.key(),
@@ -113,6 +120,20 @@ pub mod taxed_token_launchpad {
                 ctx.accounts.payer.to_account_info(),
                 ctx.accounts.mint.to_account_info(),
                 ctx.accounts.system_program.to_account_info(),
+            ],
+        )?;
+
+        // Initialize non-transferable extension **before** initializing the mint
+        let init_nt_ix = token_instruction::initialize_non_transferable_mint(
+            &ctx.accounts.token_program.key(),
+            &ctx.accounts.mint.key(),
+        )?;
+
+        invoke(
+            &init_nt_ix,
+            &[
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
             ],
         )?;
 
@@ -134,17 +155,36 @@ pub mod taxed_token_launchpad {
             ],
         )?;
 
-        // Initialize non-transferable extension
-        let init_nt_ix = token_instruction::initialize_non_transferable_mint(
+        Ok(())
+    }
+
+    /// Transfer using TransferCheckedWithFee CPI — useful for tests and clients to use
+    pub fn transfer_with_fee(
+        ctx: Context<TransferWithFee>,
+        amount: u64,
+        decimals: u8,
+        fee: u64,
+    ) -> Result<()> {
+        let ix = spl_token_2022::extension::transfer_fee::instruction::transfer_checked_with_fee(
             &ctx.accounts.token_program.key(),
+            &ctx.accounts.source.key(),
             &ctx.accounts.mint.key(),
+            &ctx.accounts.destination.key(),
+            &ctx.accounts.authority.key(),
+            &[],
+            amount,
+            decimals,
+            fee,
         )?;
 
         invoke(
-            &init_nt_ix,
+            &ix,
             &[
-                ctx.accounts.mint.to_account_info(),
                 ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.source.to_account_info(),
+                ctx.accounts.mint.to_account_info(),
+                ctx.accounts.destination.to_account_info(),
+                ctx.accounts.authority.to_account_info(),
             ],
         )?;
 
@@ -207,6 +247,30 @@ pub struct CreateSoulboundToken<'info> {
 
     pub system_program: Program<'info, System>,
     pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct TransferWithFee<'info> {
+    /// Source token account (writable)
+    /// CHECK: this must be a token account for the specified mint
+    #[account(mut)]
+    pub source: UncheckedAccount<'info>,
+
+    /// Mint
+    /// CHECK: this must be the mint for the token
+    pub mint: UncheckedAccount<'info>,
+
+    /// Destination token account (writable)
+    /// CHECK: this must be a token account for the specified mint
+    #[account(mut)]
+    pub destination: UncheckedAccount<'info>,
+
+    /// Authority signing for source
+    pub authority: Signer<'info>,
+
+    /// Token-2022 program
+    /// CHECK: must be Token-2022 id
+    pub token_program: UncheckedAccount<'info>,
 }
 
 #[error_code]
