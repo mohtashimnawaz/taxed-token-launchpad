@@ -1,10 +1,15 @@
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::{program::invoke, system_instruction};
 use anchor_lang::solana_program::sysvar::rent::Rent;
+use anchor_lang::solana_program::program_pack::Pack;
+use anchor_lang::solana_program::pubkey::Pubkey; 
+
 // Import spl-token-2022 instruction constructors and state types
 use spl_token_2022::instruction as token_instruction;
 use spl_token_2022::state::Mint as Token2022Mint;
 use spl_token_2022::extension::transfer_fee::instruction::initialize_transfer_fee_config;
+use spl_token_2022::extension::transfer_fee::TransferFeeConfig;
+use spl_token_2022::extension::non_transferable::NonTransferable;
 use spl_token_2022::extension::ExtensionType;
 
 declare_id!("9zZZdmpER8Pw9QJMwSyd8cvV8swbZWeqfJG3Gz2HhVGz");
@@ -31,6 +36,7 @@ pub mod taxed_token_launchpad {
         let rent = Rent::get()?;
         // Calculate the exact account length required for a Mint with TransferFee extension
         let mint_space = ExtensionType::try_calculate_account_len::<Token2022Mint>(&[ExtensionType::TransferFeeConfig])?;
+        msg!("mint_space total: {}", mint_space);
         let lamports = rent.minimum_balance(mint_space);
 
         invoke(
@@ -58,11 +64,14 @@ pub mod taxed_token_launchpad {
             maximum_fee,
         )?;
 
-        // Pass only the accounts expected by the instruction (mint) to save compute
         invoke(
             &init_tf_ix,
             &[
                 ctx.accounts.mint.to_account_info(),
+                ctx.accounts.mint_authority.to_account_info(),
+                ctx.accounts.fee_withdraw_authority.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
+                ctx.accounts.rent.to_account_info(),
             ],
         )?;
 
@@ -96,6 +105,7 @@ pub mod taxed_token_launchpad {
         let rent = Rent::get()?;
         // Calculate exact account length for a Mint with NonTransferable extension
         let mint_space = ExtensionType::try_calculate_account_len::<Token2022Mint>(&[ExtensionType::NonTransferable])?;
+        msg!("mint_space total: {}", mint_space);
         let lamports = rent.minimum_balance(mint_space);
 
         invoke(
@@ -119,11 +129,11 @@ pub mod taxed_token_launchpad {
             &ctx.accounts.mint.key(),
         )?;
 
-        // Pass only the accounts expected by the instruction (mint)
         invoke(
             &init_nt_ix,
             &[
                 ctx.accounts.mint.to_account_info(),
+                ctx.accounts.token_program.to_account_info(),
             ],
         )?;
 
@@ -170,6 +180,7 @@ pub mod taxed_token_launchpad {
         invoke(
             &ix,
             &[
+                ctx.accounts.token_program.to_account_info(),
                 ctx.accounts.source.to_account_info(),
                 ctx.accounts.mint.to_account_info(),
                 ctx.accounts.destination.to_account_info(),
@@ -194,11 +205,11 @@ pub struct CreateTaxedToken<'info> {
 
     /// Authority that will be set as the mint authority
     /// CHECK: this account must be a signer (the mint authority)
-    pub mint_authority: UncheckedAccount<'info>,
+    pub mint_authority: Signer<'info>,
 
     /// Authority that will be allowed to withdraw withheld fees
-    /// CHECK: this is a public key used as withdraw authority (no signer required)
-    pub fee_withdraw_authority: UncheckedAccount<'info>,
+    /// CHECK: this account must be a signer (fee withdraw authority)
+    pub fee_withdraw_authority: Signer<'info>,
 
     /// Optional freeze authority
     /// CHECK: any pubkey
@@ -223,8 +234,8 @@ pub struct CreateSoulboundToken<'info> {
     pub mint: Signer<'info>,
 
     /// Authority that will be set as mint authority
-    /// CHECK: this is a public key used as mint authority (no signer required)
-    pub mint_authority: UncheckedAccount<'info>,
+    /// CHECK: this account must be a signer (the mint authority)
+    pub mint_authority: Signer<'info>,
 
     /// Optional freeze authority
     /// CHECK: any pubkey
