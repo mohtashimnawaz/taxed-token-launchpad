@@ -5,6 +5,9 @@ package_manager = "yarn"
 resolution = true
 skip-lint = false
 
+[programs.devnet]
+taxed_token_launchpad = "9zZZdmpER8Pw9QJMwSyd8cvV8swbZWeqfJG3Gz2HhVGz"
+
 [programs.localnet]
 taxed_token_launchpad = "9zZZdmpER8Pw9QJMwSyd8cvV8swbZWeqfJG3Gz2HhVGz"
 
@@ -12,7 +15,7 @@ taxed_token_launchpad = "9zZZdmpER8Pw9QJMwSyd8cvV8swbZWeqfJG3Gz2HhVGz"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
