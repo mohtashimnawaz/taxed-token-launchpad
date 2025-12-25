@@ -287,3 +287,4 @@ pub enum MyError {
     #[msg("Failed to initialize non-transferable extension")]
     NonTransferableInitFailed,
 }
+
